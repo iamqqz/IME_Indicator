@@ -1,0 +1,34 @@
+# 输入指示器 (IME Indicator) 配置文件
+
+[poll]
+state_interval_ms = 100   # 状态检测间隔 (ms)
+track_interval_ms = 10    # 位置追踪间隔 (ms)
+
+[tray]
+enable = true               # 是否显示托盘图标 (false 时完全后台运行，只能通过任务管理器结束)
+
+[caret]
+enable = true               # 是否启用文本光标提示
+color_cn = "#FF7800A0"    # 中文状态颜色 (#RRGGBBAA)
+color_en = "#0078FF30"    # 英文状态颜色
+size = 8                    # 提示球大小
+offset_x = 0
+offset_y = 0
+show_en = true              # 英文状态下是否显示
+
+[mouse]
+mode = "fallback"           # 鼠标标记模式: off | follow | fallback
+color_cn = "#FF7800C8"    # 中文状态颜色
+color_en = "#0078FF30"    # 英文状态颜色
+size = 8                    # 提示球大小
+offset_x = 0
+offset_y = 24
+show_en = true              # 英文状态下是否显示
+target_cursors = [32513, 32512]  # I-Beam, Normal
+
+[ipc]
+enable = true               # 常驻桥接 IPC
+port = 51234                # 监听端口 (Windows 侧 loopback)
+bind = "loopback"           # loopback | wsl | all
+token = ""                  # bind 非 loopback 时必填
+foreground_whitelist = ["windowsterminal.exe", "wsl.exe", "conhost.exe", "neovide.exe"]  # SET 仅允许这些前台进程

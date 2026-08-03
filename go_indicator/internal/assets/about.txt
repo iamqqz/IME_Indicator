@@ -1,0 +1,15 @@
+IME Indicator (输入法中英状态指示器)
+
+一个 Windows 平台的常驻进程，在文本光标或鼠标指针旁绘制
+彩色小圆点，指示当前是中文还是英文输入模式；并内置
+IPC（TCP loopback），供 WSL / nvim 等外部程序查询与切换
+输入法状态，或对自渲染终端（Windows Terminal 等）通过
+状态推送 + OSC 12 上色。
+
+实现：Go + Win32 API（零 cgo，可交叉编译）
+- 文本光标定位：GetGUIThreadInfo / UI Automation / MSAA / IME 组合窗口 多级回退
+- 渲染：分层置顶透明窗口 + 预乘 alpha DIB
+- 系统托盘：Shell_NotifyIconW
+- IPC：TCP 127.0.0.1（默认端口 51234）
+
+配置文件：与 exe 同目录的 config.toml
