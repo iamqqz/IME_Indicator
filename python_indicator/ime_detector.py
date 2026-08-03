@@ -5,6 +5,19 @@ from win32_api import (
 )
 from ctypes import byref, sizeof, wintypes
 
+# SET 用命令（与 Go/Rust 版一致）
+IMC_SETOPENSTATUS = 0x0006
+IMC_SETCONVERSIONMODE = 0x0002
+
+# kernel32：用于按前台窗口取进程名（SET 白名单校验）
+_kernel32 = ctypes.windll.kernel32
+_kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+_kernel32.OpenProcess.restype = wintypes.HANDLE
+_kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+_kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+_kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+_kernel32.CloseHandle.restype = wintypes.BOOL
+
 def get_focused_window():
     """获取当前焦点窗口"""
     fore_hwnd = user32.GetForegroundWindow()
@@ -57,3 +70,40 @@ def is_chinese_mode():
     if conversion_mode is not None:
         return bool(conversion_mode & IME_CMODE_NATIVE)
     return False
+
+def get_foreground_process_name():
+    """返回前台窗口所属进程名（小写，含 .exe），用于 SET 白名单校验。失败返回空串。"""
+    hwnd = user32.GetForegroundWindow()
+    if not hwnd:
+        return ""
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, byref(pid))
+    if not pid.value:
+        return ""
+    PROCESS_QUERY_INFORMATION = 0x0400
+    PROCESS_VM_READ = 0x0010
+    h = _kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, False, pid.value)
+    if not h:
+        return ""
+    try:
+        buf = ctypes.create_unicode_buffer(260)
+        size = wintypes.DWORD(260)
+        if _kernel32.QueryFullProcessImageNameW(h, 0, buf, byref(size)):
+            return buf.value.rsplit("\\", 1)[-1].lower()
+        return ""
+    finally:
+        _kernel32.CloseHandle(h)
+
+def set_mode(chinese):
+    """绝对设置中/英文输入模式。沿用 OPEN=1/CONV=1025（中文）、OPEN=0/CONV=1024（英文）。"""
+    hwnd = get_focused_window()
+    if not hwnd:
+        return False
+    ime_hwnd = get_ime_window(hwnd)
+    if not ime_hwnd:
+        return False
+    open_status = 1 if chinese else 0
+    conv_mode = 1025 if chinese else 1024
+    r1 = send_message_timeout(ime_hwnd, WM_IME_CONTROL, IMC_SETOPENSTATUS, open_status)
+    r2 = send_message_timeout(ime_hwnd, WM_IME_CONTROL, IMC_SETCONVERSIONMODE, conv_mode)
+    return (r1 is not None) and (r2 is not None)

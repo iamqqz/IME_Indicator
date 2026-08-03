@@ -15,14 +15,32 @@ CARET_OFFSET_X = 0            # 提示器 X 偏移
 CARET_OFFSET_Y = 0            # 提示器 Y 偏移 (为 0 时紧贴光标底部)
 CARET_SHOW_EN = True          # 英文状态下是否也显示
 
-# ============ 2. 鼠标跟随提示 (Mouse Indicator) ============
-MOUSE_ENABLE = False           # 是否启用鼠标提示
+# ============ 2. 鼠标标记 (Mouse Indicator) ============
+# 鼠标位置的输入法状态标记模式（三选一）：
+#   "off"      —— 不显示鼠标标记
+#   "follow"   —— 跟随鼠标：鼠标悬停在目标光标形状(I-Beam/箭头)上时显示
+#   "fallback" —— 兜底：拿不到文本光标位置(如 Windows Terminal)时，在鼠标位置显示
+MOUSE_MODE = "fallback"        # off | follow | fallback
 MOUSE_COLOR_CN = "#FF7800C8"  # 中文颜色
 MOUSE_COLOR_EN = "#0078FF30"  # 英文颜色
 MOUSE_SIZE = 8                # 提示器大小
-MOUSE_OFFSET_X = 2            # 提示器 X 偏移
-MOUSE_OFFSET_Y = 18           # 提示器 Y 偏移
-MOUSE_SHOW_EN = False         # 英文状态下是否也显示
+MOUSE_OFFSET_X = 0            # 提示器 X 偏移
+MOUSE_OFFSET_Y = 24           # 提示器 Y 偏移
+MOUSE_SHOW_EN = True         # 英文状态下是否也显示
 
 # 仅在以下鼠标形状时显示 (OCR_IBEAM: I型光标, OCR_NORMAL: 标准箭头)
 MOUSE_TARGET_CURSORS = [OCR_IBEAM, OCR_NORMAL]
+
+# ============ 3. 托盘 ============
+TRAY_ENABLE = True           # 是否显示系统托盘图标（false 时完全后台，只能任务管理器结束）
+
+# ============ 4. 常驻 IPC 桥接 ============
+# 默认在 Windows 侧监听 TCP loopback；WSL 内 nvim 用同脚本的 --client 子进程桥接。
+IPC_ENABLE = True
+IPC_PORT = 51234  # 原 45123 在本机被系统预留，无法绑定；51234 实测可用
+IPC_BIND = "loopback"         # loopback | wsl | all（非 loopback 需设 TOKEN）
+IPC_TOKEN = ""
+
+# SET 安全白名单：仅当焦点窗口进程名（小写）在此列表时才允许设置输入法，
+# 否则返回 ERR not-foreground（防止 nvim 后台 SET 改到别的窗口）。
+FOREGROUND_WHITELIST = ["windowsterminal.exe", "wsl.exe", "conhost.exe"]
