@@ -4,10 +4,12 @@ IME Indicator（输入法中英状态指示器）入口。
 子命令：
   （无参数）       常驻进程：检测器 + 托盘 + 常驻 IPC
   get|zh|en       一次性查询/设置（WSL 的“exe”桥接方式用）
-  --client        WSL 桥接子进程：连本机 loopback 的 IPC，stdio <-> TCP
+  --client        stdio <-> TCP 中继子进程（WSL 为 NAT 网络模式时使用）
 
-说明：常驻进程在 Windows 侧监听 TCP 127.0.0.1:<port>；WSL 内 nvim 用同脚本的
---client 子进程（本身运行在 Windows 侧）桥接，从而跨 WSL2 工作。
+说明：常驻进程在 Windows 侧监听 TCP 127.0.0.1:<port>。WSL 内 nvim 的接入方式取决于
+.wslconfig 的 networkingMode：mirrored（+ hostAddressLoopback）下 WSL 与 Windows 共享
+loopback，nvim 可用 sockconnect 直连本端口，无需中继；NAT（默认）下 127.0.0.1 不互通，
+须用同脚本的 --client 子进程（本身运行在 Windows 侧）做 stdio 中继。
 对所有“拿不到文本光标位置”的窗口（含 Windows Terminal 等自渲染终端）不特殊处理，
 统一走兜底：在鼠标位置绘制状态标记；同时经 IPC 广播 IME 状态，供 nvim 自行上色。
 """
@@ -214,6 +216,14 @@ def main():
             pass
 
 
+USAGE = """用法: python main.py [子命令]
+
+  （无参数）    常驻进程：检测器 + 托盘 + 常驻 IPC
+  get|zh|en    一次性查询/设置输入法状态
+  --client     stdio <-> TCP 中继子进程（WSL 为 NAT 网络模式时使用）
+"""
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         arg = sys.argv[1]
@@ -223,4 +233,7 @@ if __name__ == "__main__":
         if arg == "--client":
             run_client(config)
             sys.exit(0)
+        # 未知参数不得落到常驻模式：否则拼错子命令会静默多出一个托盘进程
+        sys.stderr.write("未知参数: %s\n\n%s" % (arg, USAGE))
+        sys.exit(2)
     main()

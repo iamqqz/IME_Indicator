@@ -35,7 +35,10 @@ MOUSE_TARGET_CURSORS = [OCR_IBEAM, OCR_NORMAL]
 TRAY_ENABLE = True           # 是否显示系统托盘图标（false 时完全后台，只能任务管理器结束）
 
 # ============ 4. 常驻 IPC 桥接 ============
-# 默认在 Windows 侧监听 TCP loopback；WSL 内 nvim 用同脚本的 --client 子进程桥接。
+# 默认在 Windows 侧监听 TCP loopback。
+# WSL 内 nvim 的接入方式取决于 .wslconfig 的 networkingMode：
+#   mirrored（+ hostAddressLoopback）：WSL 内可直连 127.0.0.1，nvim 用 sockconnect 直接连本端口；
+#   NAT（默认）：127.0.0.1 不互通，需用同脚本的 --client 子进程做 stdio↔TCP 中继。
 IPC_ENABLE = True
 IPC_PORT = 51234  # 原 45123 在本机被系统预留，无法绑定；51234 实测可用
 IPC_BIND = "loopback"         # loopback | wsl | all（非 loopback 需设 TOKEN）
@@ -43,4 +46,4 @@ IPC_TOKEN = ""
 
 # SET 安全白名单：仅当焦点窗口进程名（小写）在此列表时才允许设置输入法，
 # 否则返回 ERR not-foreground（防止 nvim 后台 SET 改到别的窗口）。
-FOREGROUND_WHITELIST = ["windowsterminal.exe", "wsl.exe", "conhost.exe"]
+FOREGROUND_WHITELIST = ["windowsterminal.exe", "wsl.exe", "conhost.exe", "neovide.exe"]

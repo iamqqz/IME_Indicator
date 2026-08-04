@@ -17,3 +17,7 @@ python_indicator/.venv/
 *.rs.bk
 Thumbs.db
 desktop.ini
+
+# Go 构建产物（由 build.sh 生成，不应入库）
+go_indicator/IME-Indicator.exe
+go_indicator/cmd/imeqiao/rsrc_windows_amd64.syso
