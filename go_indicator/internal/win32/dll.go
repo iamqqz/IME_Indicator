@@ -52,6 +52,8 @@ var (
 	// GetDC / ReleaseDC 由 user32.dll 导出（gdi32 不含，懒加载会 panic）
 	ProcGetDC                      = user32.NewProc("GetDC")
 	ProcReleaseDC                  = user32.NewProc("ReleaseDC")
+	ProcIsWindowVisible            = user32.NewProc("IsWindowVisible")
+	ProcGetWindowRect              = user32.NewProc("GetWindowRect")
 	ProcOpenProcess                = kernel32.NewProc("OpenProcess")
 	ProcQueryFullProcessImageNameW = kernel32.NewProc("QueryFullProcessImageNameW")
 	ProcCloseHandle                = kernel32.NewProc("CloseHandle")
@@ -93,8 +95,9 @@ var (
 	ProcCoUninitialize   = ole32.NewProc("CoUninitialize")
 
 	// kernel32
-	ProcCreateMutexW     = kernel32.NewProc("CreateMutexW")
-	ProcGetModuleHandleW = kernel32.NewProc("GetModuleHandleW")
+	ProcCreateMutexW       = kernel32.NewProc("CreateMutexW")
+	ProcGetModuleHandleW   = kernel32.NewProc("GetModuleHandleW")
+	ProcEnumResourceNamesW = kernel32.NewProc("EnumResourceNamesW")
 )
 
 // CallR 调用过程并返回第一个返回值（r1）。

@@ -42,6 +42,16 @@ type Config struct {
 
 	// SET 安全：仅当焦点窗口进程名在此白名单（小写）时才允许设置输入法
 	ForegroundWhiteList []string
+
+	// 日志：诊断不稳定问题用，落盘到 %LOCALAPPDATA%\IME-Indicator\ime.log
+	Log LogConfig
+}
+
+// LogConfig 日志配置（对应 [log] 段）
+type LogConfig struct {
+	Enabled bool
+	Level   string // debug | info | warn | error
+	Path    string // 自定义日志路径，空则用默认位置
 }
 
 // Default 默认值
@@ -53,7 +63,7 @@ func Default() *Config {
 
 		CaretEnable:  true,
 		CaretColorCN: ParseColor("#FF7800A0"),
-		CaretColorEN: ParseColor("#0078FF30"),
+		CaretColorEN: ParseColor("#0078FFA0"),
 		CaretSize:    8,
 		CaretOffsetX: 0,
 		CaretOffsetY: 0,
@@ -61,7 +71,7 @@ func Default() *Config {
 
 		MouseMode:          "fallback",
 		MouseColorCN:       ParseColor("#FF7800C8"),
-		MouseColorEN:       ParseColor("#0078FF30"),
+		MouseColorEN:       ParseColor("#0078FFA0"),
 		MouseSize:          8,
 		MouseOffsetX:       0,
 		MouseOffsetY:       24,
@@ -74,6 +84,12 @@ func Default() *Config {
 		IPCToken:  "",
 
 		ForegroundWhiteList: []string{"windowsterminal.exe", "wsl.exe", "conhost.exe", "neovide.exe"},
+
+		Log: LogConfig{
+			Enabled: true,
+			Level:   "info",
+			Path:    "",
+		},
 	}
 }
 
@@ -273,6 +289,16 @@ func loadConfig() *Config {
 		}
 	}
 
+	if v, ok := getBool("log", "enabled"); ok {
+		cfg.Log.Enabled = v
+	}
+	if v, ok := get("log", "level"); ok {
+		cfg.Log.Level = v
+	}
+	if v, ok := get("log", "path"); ok {
+		cfg.Log.Path = v
+	}
+
 	return cfg
 }
 
@@ -319,7 +345,7 @@ enable = true               # 是否显示托盘图标 (false 时完全后台运
 [caret]
 enable = true               # 是否启用文本光标提示
 color_cn = "#FF7800A0"    # 中文状态颜色 (#RRGGBBAA)
-color_en = "#0078FF30"    # 英文状态颜色
+color_en = "#0078FFA0"    # 英文状态颜色
 size = 8                    # 提示球大小
 offset_x = 0
 offset_y = 0
@@ -328,7 +354,7 @@ show_en = true              # 英文状态下是否显示
 [mouse]
 mode = "fallback"           # 鼠标标记模式: off | follow | fallback
 color_cn = "#FF7800C8"    # 中文状态颜色
-color_en = "#0078FF30"    # 英文状态颜色
+color_en = "#0078FFA0"    # 英文状态颜色
 size = 8                    # 提示球大小
 offset_x = 0
 offset_y = 24
@@ -341,5 +367,10 @@ port = 51234                # 监听端口 (Windows 侧 loopback)
 bind = "loopback"           # loopback | wsl | all
 token = ""                  # bind 非 loopback 时必填
 foreground_whitelist = ["windowsterminal.exe", "wsl.exe", "conhost.exe", "neovide.exe"]  # SET 仅允许这些前台进程
+
+[log]
+enabled = true               # 是否写诊断日志（发布版无控制台，必须落盘才能分析）
+level = "info"               # 级别: debug | info | warn | error（排查时可临时改 debug）
+path = ""                    # 日志文件路径，空则用 %LOCALAPPDATA%\IME-Indicator\ime.log
 `
 }

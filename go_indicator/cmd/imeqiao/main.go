@@ -20,6 +20,7 @@ import (
 	"imeqiao/internal/cursordetect"
 	"imeqiao/internal/daemon"
 	"imeqiao/internal/imedetect"
+	"imeqiao/internal/logging"
 	"imeqiao/internal/overlay"
 	"imeqiao/internal/tray"
 	"imeqiao/internal/win32"
@@ -107,7 +108,12 @@ func runDiag() {
 
 func setDpiAwareness() {
 	if r, _, _ := win32.ProcSetProcessDpiAwareness.Call(2); r != 0 {
-		win32.ProcSetProcessDPIAware.Call()
+		// 回退到旧 API；若仍失败则记录（DPI 感知缺失会导致圆点位置偏移）
+		if r2, _, _ := win32.ProcSetProcessDPIAware.Call(); r2 == 0 {
+			logging.Warn("DPI 感知设置失败，圆点位置可能在多 DPI 屏幕上偏移", "hr", r, "hr2", r2)
+		} else {
+			logging.Debug("SetProcessDpiAwareness 失败，已回退 SetProcessDPIAware", "hr", r)
+		}
 	}
 }
 
@@ -117,10 +123,12 @@ func ensureSingleInstance() bool {
 	name, _ := windows.UTF16PtrFromString("Global\\IMEQiao")
 	h, _, err := win32.ProcCreateMutexW.Call(0, 0, uintptr(unsafe.Pointer(name)))
 	if h == 0 {
+		logging.Error("单实例互斥体创建失败（CreateMutexW 返回 0）", "err", err)
 		return false
 	}
 	gMutex = windows.Handle(h)
 	if err == windows.ERROR_ALREADY_EXISTS {
+		logging.Info("已有实例在运行，本进程退出")
 		return false
 	}
 	return true
@@ -166,16 +174,24 @@ func printStartupStatus(cfg *config.Config, server *daemon.Server) {
 }
 
 func runDaemon() {
+	cfg := config.Get()
+	logging.Init(logging.Options{
+		Enabled: cfg.Log.Enabled,
+		Level:   cfg.Log.Level,
+		Path:    cfg.Log.Path,
+	})
+	defer logging.Close()
+
 	setDpiAwareness()
 	if !ensureSingleInstance() {
 		fmt.Println("IME Indicator 已在运行")
 		os.Exit(0)
 	}
 
-	cfg := config.Get()
 	hub := daemon.NewHub()
 	server, err := daemon.Start(cfg, hub)
 	if err != nil {
+		logging.Error("IPC 启动失败，nvim/WSL 桥接将不可用", "error", err)
 		fmt.Fprintln(os.Stderr, "IPC 启动失败:", err)
 	}
 
@@ -187,9 +203,10 @@ func runDaemon() {
 
 	// 检测器线程（锁定线程 + COM）
 	go func() {
+		defer wg.Done()
 		runtime.LockOSThread()
+		defer logging.Recover("detector")
 		runDetector(cfg, server, done)
-		wg.Done()
 	}()
 
 	if cfg.TrayEnable {
@@ -204,7 +221,17 @@ func runDaemon() {
 	}
 
 	close(done)
-	wg.Wait()
+	// 防止 detector 被前台应用 UIA/COM 调用阻塞导致退出卡死、托盘残留
+	waitDone := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(waitDone)
+	}()
+	select {
+	case <-waitDone:
+	case <-time.After(3 * time.Second):
+		logging.Error("退出卡死：detector 未在 3s 内结束（可能被前台应用的 UIA/COM 调用阻塞），强制继续清理")
+	}
 	if server != nil {
 		server.Close()
 	}
@@ -235,6 +262,9 @@ func runDetector(cfg *config.Config, server *daemon.Server, done chan struct{}) 
 	mouseActive := false
 	prevMode := false
 
+	// 诊断：记录上一次关键状态，仅在切换时打 debug 日志（避免刷屏）
+	dbgSelf, dbgCaretShould, dbgCaretActive, dbgMouse := false, false, false, false
+
 	for {
 		select {
 		case <-done:
@@ -245,28 +275,26 @@ func runDetector(cfg *config.Config, server *daemon.Server, done chan struct{}) 
 		now := time.Now()
 		if now.Sub(lastState) >= stateInterval {
 			chineseMode = imedetect.IsChineseMode()
+			selfRender := isSelfRendering() // 仅供诊断日志；不再用它隐藏 overlay
 
 			// caret
+			// 关键：不再对“自渲染终端(Windows Terminal 等)”特判隐藏。
+			// 这些终端本就拿不到 Win32 文本光标，GetCaretPos 自然失败 →
+			// caretUnavailable=true，自动落入鼠标兜底分支；同时 caret overlay 仍
+			// 按 GetCaretPos 成败正常显隐。这与能正常工作的 Python 参考实现一致，
+			// 也避免“特判隐藏后 Update 不再被调用、可见性无法保活”的死结。
 			caretUnavailable := false
+			caretShould := false
 			if cfg.CaretEnable && caretOverlay != nil {
-				if isSelfRendering() {
-					// 自渲染终端(Windows Terminal 等)拿不到文本光标位置
-					caretUnavailable = true
-					if caretActive {
-						caretActive = false
+				_, ok := caretDetector.GetCaretPos()
+				caretUnavailable = !ok
+				caretShould = ok && (chineseMode || cfg.CaretShowEN)
+				if caretShould != caretActive {
+					caretActive = caretShould
+					if caretShould {
+						caretOverlay.Show()
+					} else {
 						caretOverlay.Hide()
-					}
-				} else {
-					_, ok := caretDetector.GetCaretPos()
-					caretUnavailable = !ok
-					should := ok && (chineseMode || cfg.CaretShowEN)
-					if should != caretActive {
-						caretActive = should
-						if should {
-							caretOverlay.Show()
-						} else {
-							caretOverlay.Hide()
-						}
 					}
 				}
 			}
@@ -293,6 +321,19 @@ func runDetector(cfg *config.Config, server *daemon.Server, done chan struct{}) 
 						mouseOverlay.Hide()
 					}
 				}
+			}
+
+			// 诊断：关键状态切换时记录（debug 级），用于分析“标记消失”类问题
+			if selfRender != dbgSelf || caretShould != dbgCaretShould || caretActive != dbgCaretActive || mouseActive != dbgMouse {
+				logging.Debug("detector 状态切换",
+					"selfRender", selfRender,
+					"chinese", chineseMode,
+					"caretAvail", !caretUnavailable,
+					"caretShould", caretShould,
+					"caretActive", caretActive,
+					"mouseActive", mouseActive,
+					"mode", cfg.MouseMode)
+				dbgSelf, dbgCaretShould, dbgCaretActive, dbgMouse = selfRender, caretShould, caretActive, mouseActive
 			}
 
 			if chineseMode != prevMode {

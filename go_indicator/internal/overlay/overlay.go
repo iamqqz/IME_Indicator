@@ -3,10 +3,13 @@
 package overlay
 
 import (
+	"fmt"
 	"math"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"imeqiao/internal/logging"
 	"imeqiao/internal/win32"
 )
 
@@ -37,6 +40,7 @@ func registerClass() {
 // IndicatorOverlay 单个悬浮窗
 type IndicatorOverlay struct {
 	hwnd    win32.HWND
+	name    string
 	size    int32
 	colorCN uint32
 	colorEN uint32
@@ -47,6 +51,9 @@ type IndicatorOverlay struct {
 	cnBmp  win32.HBITMAP
 	enBmp  win32.HBITMAP
 	oldBmp win32.HGDIOBJ
+
+	lastDrawErrLog time.Time // 限流：绘制失败日志最多每 5s 一条
+	lastDiagLog    time.Time // 限流：诊断日志最多每 2s 一条
 }
 
 // New 创建悬浮窗并预渲染中/英两种颜色的圆点
@@ -59,12 +66,15 @@ func New(name string, size int32, colorCN, colorEN uint32, offsetX, offsetY int3
 
 	cnBmp, _ := createDIB(memDC, size, colorCN)
 	enBmp, _ := createDIB(memDC, size, colorEN)
+	if cnBmp == 0 || enBmp == 0 {
+		logging.Warn("overlay: 创建圆点 DIB 失败，圆点将不可见", "name", name)
+	}
 
 	title, _ := windows.UTF16PtrFromString("Indicator_" + name)
 	clsName, _ := windows.UTF16PtrFromString(className)
 	hInst, _, _ := win32.ProcGetModuleHandleW.Call(0)
 
-	exStyle := uint32(win32.WS_EX_LAYERED | win32.WS_EX_TRANSPARENT | win32.WS_EX_TOPMOST | win32.WS_EX_NOACTIVATE | win32.WS_EX_TOOLWINDOW)
+	exStyle := uint32(win32.WS_EX_LAYERED | win32.WS_EX_TRANSPARENT | win32.WS_EX_TOPMOST | win32.WS_EX_NOACTIVATE)
 	hwnd, _, _ := win32.ProcCreateWindowExW.Call(
 		uintptr(exStyle),
 		uintptr(unsafe.Pointer(clsName)),
@@ -75,9 +85,13 @@ func New(name string, size int32, colorCN, colorEN uint32, offsetX, offsetY int3
 		uintptr(hInst),
 		0,
 	)
+	if hwnd == 0 {
+		logging.Error("overlay: CreateWindowExW 失败 (hwnd=0)，悬浮窗不可用", "name", name)
+	}
 
 	return &IndicatorOverlay{
 		hwnd:    win32.HWND(hwnd),
+		name:    name,
 		size:    size,
 		colorCN: colorCN,
 		colorEN: colorEN,
@@ -184,9 +198,13 @@ func (o *IndicatorOverlay) Update(x, y int32, isChinese bool, caretH int32) {
 		SourceConstantAlpha: 255,
 		AlphaFormat:         win32.AC_SRC_ALPHA,
 	}
-	win32.ProcUpdateLayeredWindow.Call(
+	// 关键修正：hdcDest 传每帧新鲜的 screen DC（GetDC/ReleaseDC），与能正常工作的
+	// Python 参考一致。之前传 0(NULL) 启动时能显示，但切换前台窗口后分层窗口会
+	// 从 DWM 合成树掉出 → 圆点永久消失。
+	screenDC, _, _ := win32.ProcGetDC.Call(0)
+	ulwRet := win32.CallR(win32.ProcUpdateLayeredWindow,
 		uintptr(o.hwnd),
-		0,
+		screenDC,
 		uintptr(unsafe.Pointer(&dest)),
 		uintptr(unsafe.Pointer(&sz)),
 		uintptr(o.memDC),
@@ -195,14 +213,42 @@ func (o *IndicatorOverlay) Update(x, y int32, isChinese bool, caretH int32) {
 		uintptr(unsafe.Pointer(&blend)),
 		win32.ULW_ALPHA,
 	)
+	win32.ProcReleaseDC.Call(0, screenDC)
+	if ulwRet == 0 {
+		// 绘制失败会导致圆点冻结/不动，是常见"不稳定"症状，但限流以免刷屏
+		now := time.Now()
+		if now.Sub(o.lastDrawErrLog) > 5*time.Second {
+			o.lastDrawErrLog = now
+			logging.Warn("overlay: UpdateLayeredWindow 失败（圆点可能冻结），hwnd=0 表示窗口未创建", "hwnd", o.hwnd)
+		}
+	}
 
-	// 保持最顶层
-	win32.ProcSetWindowPos.Call(
+	// 保持最顶层 + 每帧重新断言可见性。
+	// WS_EX_LAYERED 弹出窗在切换前台窗口/虚拟桌面时可能被系统（DWM）悄悄隐藏，
+	// 而 Show/Hide 仅在状态切换时调用一次，故此处用 SWP_SHOWWINDOW 强制窗口重新
+	// 进入合成树——否则一旦被隐藏就再也回不来（Python 参考实现正是此写法）。
+	// 注意：必须在 UpdateLayeredWindow 之后调用（与 Python 顺序一致）。
+	swpRet := win32.CallR(win32.ProcSetWindowPos,
 		uintptr(o.hwnd),
 		uintptr(win32.HwndTopMost()),
 		0, 0, 0, 0,
-		win32.SWP_NOMOVE|win32.SWP_NOSIZE|win32.SWP_NOACTIVATE,
+		win32.SWP_NOMOVE|win32.SWP_NOSIZE|win32.SWP_NOACTIVATE|win32.SWP_SHOWWINDOW,
 	)
+
+	// 诊断：每 2 秒记录一次窗口实际可见性、定位坐标与屏幕矩形，用于定位“切窗口后圆点消失”
+	now := time.Now()
+	if now.Sub(o.lastDiagLog) > 2*time.Second {
+		o.lastDiagLog = now
+		visible := win32.CallOK(win32.ProcIsWindowVisible, uintptr(o.hwnd))
+		var rc win32.RECT
+		win32.ProcGetWindowRect.Call(uintptr(o.hwnd), uintptr(unsafe.Pointer(&rc)))
+		logging.Info("overlay 诊断",
+			"name", o.name, "hwnd", o.hwnd, "visible", visible,
+			"cursor", fmt.Sprintf("%d,%d", x, y),
+			"dest", fmt.Sprintf("%d,%d", dest.X, dest.Y),
+			"rect", fmt.Sprintf("L=%d T=%d R=%d B=%d", rc.Left, rc.Top, rc.Right, rc.Bottom),
+			"ulw", ulwRet, "swp", swpRet)
+	}
 
 	// 处理本窗口消息
 	var msg win32.MSG

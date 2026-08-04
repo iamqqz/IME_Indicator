@@ -16,7 +16,7 @@ RSRC := cmd/imeqiao/rsrc_windows_amd64.syso
 all: $(EXE)
 
 $(RSRC):
-	go run github.com/akavel/rsrc@latest -ico assets/icon.ico -manifest assets/app.manifest -o $(RSRC)
+	go run github.com/akavel/rsrc@latest -ico assets/icon.ico -manifest assets/app.manifest -o $(RSRC) || echo "警告: rsrc 生成嵌入资源失败（Go 工具链环境问题），已跳过——exe 仍可编译，仅缺嵌入图标"
 
 $(EXE): $(RSRC)
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -ldflags "-H windowsgui -s -w" -trimpath -o $(EXE) ./cmd/imeqiao

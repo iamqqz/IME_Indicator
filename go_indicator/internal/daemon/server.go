@@ -9,9 +9,11 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"imeqiao/internal/config"
 	"imeqiao/internal/imedetect"
+	"imeqiao/internal/logging"
 )
 
 // Server 常驻 IPC 服务
@@ -37,6 +39,8 @@ func Start(cfg *config.Config, hub *Hub) (*Server, error) {
 	}
 	s := &Server{cfg: cfg, hub: hub, ln: ln, auth: cfg.IPCBind != "loopback"}
 	go s.serve()
+	// 周期健康日志：把已实现但未使用的 hub.Dropped() 暴露出来
+	go s.health()
 	return s, nil
 }
 
@@ -56,16 +60,31 @@ func (s *Server) Close() {
 }
 
 func (s *Server) serve() {
+	defer logging.Recover("ipc.serve")
 	for {
 		conn, err := s.ln.Accept()
 		if err != nil {
+			logging.Warn("ipc: Accept 失败，IPC 服务停止监听", "error", err)
 			return
 		}
 		go s.handle(conn)
 	}
 }
 
+// health 周期性记录 hub 丢弃事件计数（默认 info 级，仅在有丢弃时输出）
+func (s *Server) health() {
+	defer logging.Recover("ipc.health")
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		if d := s.hub.Dropped(); d > 0 {
+			logging.Info("ipc: 订阅者通道溢出，已丢弃事件", "dropped", d)
+		}
+	}
+}
+
 func (s *Server) handle(conn net.Conn) {
+	defer logging.Recover("ipc.handle")
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 	writer := bufio.NewWriter(conn)
@@ -83,9 +102,14 @@ func (s *Server) handle(conn net.Conn) {
 	send := func(line string) {
 		wmu.Lock()
 		defer wmu.Unlock()
-		writer.WriteString(line)
-		writer.WriteByte('\n')
-		writer.Flush()
+		if _, err := writer.WriteString(line); err != nil {
+			logging.Warn("ipc: 写响应失败", "error", err)
+			return
+		}
+		_ = writer.WriteByte('\n')
+		if err := writer.Flush(); err != nil {
+			logging.Warn("ipc: flush 响应失败", "error", err)
+		}
 	}
 
 	for {
@@ -105,6 +129,7 @@ func (s *Server) handle(conn net.Conn) {
 				authed = true
 				send("OK")
 			} else {
+				logging.Warn("ipc: AUTH 失败（未授权）", "cmd", cmd)
 				send("ERR unauthorized")
 				return
 			}
@@ -156,6 +181,7 @@ func (s *Server) handle(conn net.Conn) {
 				}
 				// 事件推送协程
 				go func() {
+					defer logging.Recover("ipc.subPusher")
 					for msg := range subCh {
 						send(msg)
 					}
@@ -184,6 +210,7 @@ func (s *Server) allowSet() bool {
 			return true
 		}
 	}
+	logging.Warn("ipc: SET 被拒绝（前台进程不在白名单）", "foreground", fg)
 	return false
 }
 

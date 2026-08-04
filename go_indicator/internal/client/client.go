@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"imeqiao/internal/config"
+	"imeqiao/internal/logging"
 )
 
 // Run 运行客户端桥接，直到连接关闭。
@@ -28,7 +29,9 @@ func Run(cfg *config.Config) error {
 	}
 
 	go func() {
-		io.Copy(conn, os.Stdin)
+		if _, err := io.Copy(conn, os.Stdin); err != nil {
+			logging.Warn("client: stdin->conn 复制失败", "error", err)
+		}
 		conn.Close()
 	}()
 	_, err = io.Copy(os.Stdout, conn)

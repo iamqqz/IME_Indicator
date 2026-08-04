@@ -2,7 +2,6 @@
 package tray
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"unsafe"
@@ -10,6 +9,7 @@ import (
 	"golang.org/x/sys/windows"
 	"imeqiao/internal/assets"
 	"imeqiao/internal/config"
+	"imeqiao/internal/logging"
 	"imeqiao/internal/win32"
 )
 
@@ -25,6 +25,7 @@ const (
 var gOnRestart func()
 
 var trayWndProc = windows.NewCallback(func(hwnd, msg, wParam, lParam uintptr) uintptr {
+	defer logging.Recover("trayWndProc")
 	switch uint32(msg) {
 	case wmTrayIcon:
 		if uint32(lParam) == win32.WM_RBUTTONUP {
@@ -70,7 +71,7 @@ func New(onRestart func()) *TrayManager {
 		ClassName:   clsName,
 	}
 	if rc, _, _ := win32.ProcRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc))); rc == 0 {
-		fmt.Fprintln(os.Stderr, "tray: RegisterClassExW 失败 (rc=0)")
+		logging.Error("tray: RegisterClassExW 失败 (rc=0)")
 	}
 
 	title, _ := windows.UTF16PtrFromString("IME Indicator Tray")
@@ -86,12 +87,12 @@ func New(onRestart func()) *TrayManager {
 		0,
 	)
 	if hwnd == 0 {
-		fmt.Fprintln(os.Stderr, "tray: CreateWindowExW 失败 (hwnd=0)")
+		logging.Error("tray: CreateWindowExW 失败 (hwnd=0)，托盘将不可用")
 	}
 
 	icon := loadIcon()
 	if icon == 0 {
-		fmt.Fprintln(os.Stderr, "tray: loadIcon 返回 0 (无图标句柄)")
+		logging.Warn("tray: loadIcon 返回 0，使用系统默认图标")
 	}
 	nid := win32.NOTIFYICONDATA{
 		HWnd:             win32.HWND(hwnd),
@@ -103,7 +104,7 @@ func New(onRestart func()) *TrayManager {
 	nid.CbSize = uint32(unsafe.Sizeof(nid))
 	copyTip(&nid)
 	if r, _, _ := win32.ProcShellNotifyIconW.Call(win32.NIM_ADD, uintptr(unsafe.Pointer(&nid))); r == 0 {
-		fmt.Fprintln(os.Stderr, "tray: Shell_NotifyIconW(NIM_ADD) 失败 (r=0)")
+		logging.Error("tray: Shell_NotifyIconW(NIM_ADD) 失败 (r=0)，托盘图标未注册")
 	}
 
 	return &TrayManager{hwnd: win32.HWND(hwnd)}
@@ -121,7 +122,17 @@ func copyTip(nid *win32.NOTIFYICONDATA) {
 // RunMessageLoop 阻塞运行消息循环（主线程）
 func (t *TrayManager) RunMessageLoop() {
 	var msg win32.MSG
-	for win32.CallOK(win32.ProcGetMessageW, uintptr(unsafe.Pointer(&msg)), 0, 0, 0) {
+	for {
+		// GetMessageW: >0 有消息, 0 收到 WM_QUIT, -1 出错。
+		// 注意：-1 作为 uintptr 是非零，不能用 CallOK（r1!=0）判断，否则会死循环处理垃圾 MSG。
+		r := win32.CallR(win32.ProcGetMessageW, uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
+		switch {
+		case int32(r) == -1:
+			logging.Error("tray: GetMessageW 返回 -1（错误），退出消息循环", "err", int32(r))
+			return
+		case r == 0:
+			return // WM_QUIT
+		}
 		win32.ProcTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
 		win32.ProcDispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
 	}
@@ -135,7 +146,7 @@ func (t *TrayManager) Destroy() {
 	win32.ProcDestroyWindow.Call(uintptr(t.hwnd))
 }
 
-// loadIcon 优先 exe 同目录 icon.ico（LoadImageW 原生支持），失败回落嵌入资源 ID 1，
+// loadIcon 优先 exe 同目录 icon.ico（LoadImageW 原生支持），失败回落嵌入资源，
 // 再失败回落系统默认应用图标。
 func loadIcon() win32.HICON {
 	if exe, err := os.Executable(); err == nil {
@@ -146,21 +157,45 @@ func loadIcon() win32.HICON {
 			}
 		}
 	}
-	// 资源 ID 1（MAKEINTRESOURCE(1)，由 build.sh 经 rsrc 编入 .syso）
-	hInst, _, _ := win32.ProcGetModuleHandleW.Call(0)
-	r, _, _ := win32.ProcLoadImageW.Call(
-		uintptr(hInst),
-		uintptr(1),
-		win32.IMAGE_ICON, 0, 0, win32.LR_DEFAULTCOLOR,
-	)
-	if r != 0 {
-		return win32.HICON(r)
+	// 嵌入资源：枚举 RT_GROUP_ICON，加载第一个可用图标。
+	// 注意：rsrc 为组图标分配的资源 ID 不固定（当前为 2，manifest 占 1），
+	// 故不写死 ID，而是枚举，避免工具版本变化时取不到图标。
+	if h := loadIconFromResource(); h != 0 {
+		return h
 	}
 	// 兜底：系统默认应用图标
 	if r2, _, _ := win32.ProcLoadIconW.Call(0, uintptr(win32.IDI_APPLICATION)); r2 != 0 {
 		return win32.HICON(r2)
 	}
 	return 0
+}
+
+// loadIconFromResource 枚举模块内 RT_GROUP_ICON 资源并加载第一个。
+func loadIconFromResource() win32.HICON {
+	hInst, _, _ := win32.ProcGetModuleHandleW.Call(0)
+	var found win32.HICON
+	cb := windows.NewCallback(func(hMod, _ uintptr, lpszName, _ uintptr) uintptr {
+		if lpszName == 0 {
+			return 1 // 继续枚举
+		}
+		r, _, _ := win32.ProcLoadImageW.Call(
+			hMod,
+			lpszName,
+			win32.IMAGE_ICON, 0, 0, win32.LR_DEFAULTCOLOR,
+		)
+		if r != 0 {
+			found = win32.HICON(r)
+			return 0 // 找到，停止枚举
+		}
+		return 1
+	})
+	win32.ProcEnumResourceNamesW.Call(
+		hInst,
+		uintptr(win32.RT_GROUP_ICON),
+		uintptr(cb),
+		0,
+	)
+	return found
 }
 
 func loadIconFromFile(path string) win32.HICON {

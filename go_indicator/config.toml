@@ -10,7 +10,7 @@ enable = true               # 是否显示托盘图标 (false 时完全后台运
 [caret]
 enable = true               # 是否启用文本光标提示
 color_cn = "#FF7800A0"    # 中文状态颜色 (#RRGGBBAA)
-color_en = "#0078FF30"    # 英文状态颜色
+color_en = "#0078FFA0"    # 英文状态颜色
 size = 8                    # 提示球大小
 offset_x = 0
 offset_y = 0
@@ -19,7 +19,7 @@ show_en = true              # 英文状态下是否显示
 [mouse]
 mode = "fallback"           # 鼠标标记模式: off | follow | fallback
 color_cn = "#FF7800C8"    # 中文状态颜色
-color_en = "#0078FF30"    # 英文状态颜色
+color_en = "#0078FFA0"    # 英文状态颜色
 size = 8                    # 提示球大小
 offset_x = 0
 offset_y = 24
@@ -32,3 +32,8 @@ port = 51234                # 监听端口 (Windows 侧 loopback)
 bind = "loopback"           # loopback | wsl | all
 token = ""                  # bind 非 loopback 时必填
 foreground_whitelist = ["windowsterminal.exe", "wsl.exe", "conhost.exe", "neovide.exe"]  # SET 仅允许这些前台进程
+
+[log]
+enabled = true               # 是否写诊断日志（发布版无控制台，必须落盘才能分析）
+level = "info"               # 级别: debug | info | warn | error（排查时可临时改 debug）
+path = ""                    # 日志文件路径，空则用 %LOCALAPPDATA%\IME-Indicator\ime.log

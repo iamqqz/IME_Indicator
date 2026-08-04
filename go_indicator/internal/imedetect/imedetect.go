@@ -7,6 +7,7 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"imeqiao/internal/logging"
 	"imeqiao/internal/win32"
 )
 
@@ -69,17 +70,28 @@ func sendImeMessage(imeWnd win32.HWND, command uintptr, lparam uintptr) (bool, i
 func IsChineseMode() bool {
 	hwnd := getFocusedWindow()
 	if hwnd == 0 {
+		logging.Debug("IsChineseMode: 无前台/焦点窗口")
 		return false
 	}
 	imeWnd := getIMEWindow(hwnd)
 	if imeWnd == 0 {
+		logging.Debug("IsChineseMode: 无 IME 窗口（非输入焦点，视为英文）")
 		return false
 	}
 	ok, open := sendImeMessage(imeWnd, win32.IMC_GETOPENSTATUS, 0)
-	if !ok || open == 0 {
+	if !ok {
+		// 超时/失败：与"确实英文(open==0)"区分，避免排查时误判
+		logging.Debug("IsChineseMode: IMC_GETOPENSTATUS 超时/失败")
 		return false
 	}
-	_, conv := sendImeMessage(imeWnd, win32.IMC_GETCONVERSIONMODE, 0)
+	if open == 0 {
+		return false // 真正英文：未开启输入法
+	}
+	ok2, conv := sendImeMessage(imeWnd, win32.IMC_GETCONVERSIONMODE, 0)
+	if !ok2 {
+		logging.Debug("IsChineseMode: IMC_GETCONVERSIONMODE 超时/失败")
+		return false
+	}
 	return (conv & int(win32.IME_CMODE_NATIVE)) != 0
 }
 
@@ -100,7 +112,13 @@ func SetMode(chinese bool) bool {
 		open, conv = 0, 1024
 	}
 	ok1, _ := sendImeMessage(imeWnd, win32.IMC_SETOPENSTATUS, open)
+	if !ok1 {
+		logging.Warn("SetMode: IMC_SETOPENSTATUS 失败", "chinese", chinese)
+	}
 	ok2, _ := sendImeMessage(imeWnd, win32.IMC_SETCONVERSIONMODE, conv)
+	if !ok2 {
+		logging.Warn("SetMode: IMC_SETCONVERSIONMODE 失败", "chinese", chinese)
+	}
 	return ok1 && ok2
 }
 

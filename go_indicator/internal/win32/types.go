@@ -23,6 +23,7 @@ const (
 	SWP_NOMOVE     = 0x0002
 	SWP_NOSIZE     = 0x0001
 	SWP_NOACTIVATE = 0x0010
+	SWP_SHOWWINDOW = 0x0040
 	ULW_ALPHA      = 0x00000002
 	AC_SRC_OVER    = 0
 	AC_SRC_ALPHA   = 1
@@ -65,6 +66,7 @@ const (
 	PROCESS_PER_MONITOR_DPI_AWARE = 2
 	IMAGE_ICON                    = 1
 	IDI_APPLICATION               = 32512 // MAKEINTRESOURCE(32512)
+	RT_GROUP_ICON                 = 14    // 嵌入的图标组资源类型
 	LR_DEFAULTCOLOR               = 0x00000000
 	LR_LOADFROMFILE               = 0x00000010
 	LR_DEFAULTSIZE                = 0x00000040
@@ -79,8 +81,8 @@ const (
 // CLSCTX_ALL（CoCreateInstance 用）
 const CLSCTX_ALL = 0x17
 
-// HWND_TOPMOST = (HWND)-2
-var hwndTopMost = HWND(^uintptr(0) - 1)
+// HWND_TOPMOST = (HWND)-1
+var hwndTopMost = HWND(^uintptr(0))
 
 // HwndTopMost 返回 HWND_TOPMOST
 func HwndTopMost() HWND { return hwndTopMost }
