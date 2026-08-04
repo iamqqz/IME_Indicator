@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # 交叉编译 Windows 可执行文件（在 WSL/Linux 上即可运行，仅编译不运行）。
 # 产物：IME-Indicator.exe
+#
+# 建议运行时设置环境变量控制内存：
+#   set GOMEMLIMIT=16MiB    (Windows cmd)   — Go 1.19+，硬上限 16MB
+#   set GOGC=25             (Windows cmd)   — GC 目标：堆增长的 25%（默认 100%）
+# 效果：内存从 30MB 降至约 10-15MB，GC 更频繁但进程总分配量小、影响不大。
 set -euo pipefail
 cd "$(dirname "$0")"
 

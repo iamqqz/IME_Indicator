@@ -242,7 +242,7 @@ func (o *IndicatorOverlay) Update(x, y int32, isChinese bool, caretH int32) {
 		visible := win32.CallOK(win32.ProcIsWindowVisible, uintptr(o.hwnd))
 		var rc win32.RECT
 		win32.ProcGetWindowRect.Call(uintptr(o.hwnd), uintptr(unsafe.Pointer(&rc)))
-		logging.Info("overlay 诊断",
+		logging.Debug("overlay 诊断",
 			"name", o.name, "hwnd", o.hwnd, "visible", visible,
 			"cursor", fmt.Sprintf("%d,%d", x, y),
 			"dest", fmt.Sprintf("%d,%d", dest.X, dest.Y),

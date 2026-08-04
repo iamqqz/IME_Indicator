@@ -5,6 +5,10 @@
 #   make vet        # go vet（交叉编译目标）
 #   make fmt        # gofmt -w
 #   make clean      # 删除生成的 .syso 与 exe
+#
+# 运行时建议（Windows cmd）：
+#   set GOMEMLIMIT=16MiB    # Go 1.19+；限制堆上限，内存从 ~30MB 降至 ~10-15MB
+#   set GOGC=25             # GC 目标为堆增长的 25%（默认 100%）
 
 GOOS := windows
 GOARCH := amd64

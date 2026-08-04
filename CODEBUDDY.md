@@ -63,9 +63,8 @@ go run ./cmd/imeqiao
 
 ### 线程与并发模型（`main.go`）
 - `func init(){ runtime.LockOSThread() }`：主 goroutine 锁线程跑系统托盘消息循环（Win32 窗口/消息循环需线程亲和）。
-- **detector goroutine**：`runtime.LockOSThread()` + COM 初始化（STA），且永不 Unlock；持 `IUIAutomation` 实例，在同一线程创建/更新两个 overlay 窗口。采用两级轮询：
-  - `poll.state_interval_ms`（默认 100ms）做“状态检测”——读 `IsChineseMode()` 并决定各 overlay 显隐；
-  - `poll.track_interval_ms`（默认 10ms）做“坐标追踪”——仅刷新已显示 overlay 的位置。
+- **detector goroutine**：`runtime.LockOSThread()` + COM 初始化（STA），且永不 Unlock；持 `IUIAutomation` 实例，在同一线程创建/更新两个 overlay 窗口。采用单层轮询：
+  - `poll.interval_ms`（默认 30ms）统一做 IME 状态检测、overlay 显隐判定与坐标追踪。
 - **IPC 守护 goroutines**：不锁线程，纯 Go；`net.Listener.Accept` + 每连接一个 conn goroutine，`daemon.Hub` 广播状态变更。
 
 ### 配置系统（`internal/config/config.go`）

@@ -253,10 +253,8 @@ func runDetector(cfg *config.Config, server *daemon.Server, done chan struct{}) 
 		defer mouseOverlay.Cleanup()
 	}
 
-	stateInterval := time.Duration(cfg.PollStateIntervalMS) * time.Millisecond
-	trackInterval := time.Duration(cfg.PollTrackIntervalMS) * time.Millisecond
+	interval := time.Duration(cfg.PollIntervalMS) * time.Millisecond
 
-	lastState := time.Now()
 	var chineseMode bool
 	caretActive := false
 	mouseActive := false
@@ -272,80 +270,27 @@ func runDetector(cfg *config.Config, server *daemon.Server, done chan struct{}) 
 		default:
 		}
 
-		now := time.Now()
-		if now.Sub(lastState) >= stateInterval {
-			chineseMode = imedetect.IsChineseMode()
-			selfRender := isSelfRendering() // 仅供诊断日志；不再用它隐藏 overlay
+		chineseMode = imedetect.IsChineseMode()
+		selfRender := isSelfRendering() // 仅供诊断日志；不再用它隐藏 overlay
 
-			// caret
-			// 关键：不再对“自渲染终端(Windows Terminal 等)”特判隐藏。
-			// 这些终端本就拿不到 Win32 文本光标，GetCaretPos 自然失败 →
-			// caretUnavailable=true，自动落入鼠标兜底分支；同时 caret overlay 仍
-			// 按 GetCaretPos 成败正常显隐。这与能正常工作的 Python 参考实现一致，
-			// 也避免“特判隐藏后 Update 不再被调用、可见性无法保活”的死结。
-			caretUnavailable := false
-			caretShould := false
-			if cfg.CaretEnable && caretOverlay != nil {
-				_, ok := caretDetector.GetCaretPos()
-				caretUnavailable = !ok
-				caretShould = ok && (chineseMode || cfg.CaretShowEN)
-				if caretShould != caretActive {
-					caretActive = caretShould
-					if caretShould {
-						caretOverlay.Show()
-					} else {
-						caretOverlay.Hide()
-					}
+		// caret：查文本光标可用性，决定 overlay 显隐
+		caretUnavailable := false
+		caretShould := false
+		if cfg.CaretEnable && caretOverlay != nil {
+			_, ok := caretDetector.GetCaretPos()
+			caretUnavailable = !ok
+			caretShould = ok && (chineseMode || cfg.CaretShowEN)
+			if caretShould != caretActive {
+				caretActive = caretShould
+				if caretShould {
+					caretOverlay.Show()
+				} else {
+					caretOverlay.Hide()
 				}
 			}
-
-			// mouse：由 MouseMode 决定以哪种方式在鼠标位置显示
-			//  off      —— 不显示
-			//  follow   —— 跟随鼠标：悬停在目标光标形状上时显示
-			//  fallback —— 兜底：拿不到文本光标位置(含自渲染终端)时显示
-			if mouseOverlay != nil {
-				var should bool
-				switch cfg.MouseMode {
-				case "follow":
-					should = cursorDetector.IsTargetCursor() && (chineseMode || cfg.MouseShowEN)
-				case "fallback":
-					should = cfg.CaretEnable && caretUnavailable && (chineseMode || cfg.CaretShowEN)
-				default: // off 或其它
-					should = false
-				}
-				if should != mouseActive {
-					mouseActive = should
-					if should {
-						mouseOverlay.Show()
-					} else {
-						mouseOverlay.Hide()
-					}
-				}
-			}
-
-			// 诊断：关键状态切换时记录（debug 级），用于分析“标记消失”类问题
-			if selfRender != dbgSelf || caretShould != dbgCaretShould || caretActive != dbgCaretActive || mouseActive != dbgMouse {
-				logging.Debug("detector 状态切换",
-					"selfRender", selfRender,
-					"chinese", chineseMode,
-					"caretAvail", !caretUnavailable,
-					"caretShould", caretShould,
-					"caretActive", caretActive,
-					"mouseActive", mouseActive,
-					"mode", cfg.MouseMode)
-				dbgSelf, dbgCaretShould, dbgCaretActive, dbgMouse = selfRender, caretShould, caretActive, mouseActive
-			}
-
-			if chineseMode != prevMode {
-				prevMode = chineseMode
-				if server != nil {
-					server.BroadcastMode(chineseMode)
-				}
-			}
-			lastState = now
 		}
 
-		// 坐标追踪
+		// 坐标追踪（状态切换后立即刷位置，不再分两层定时器）
 		if cfg.CaretEnable && caretActive && caretOverlay != nil {
 			if pos, ok := caretDetector.GetCaretPos(); ok {
 				caretOverlay.Update(pos[0], pos[1], chineseMode, pos[2])
@@ -357,6 +302,47 @@ func runDetector(cfg *config.Config, server *daemon.Server, done chan struct{}) 
 			mouseOverlay.Update(pt.X, pt.Y, chineseMode, 0)
 		}
 
-		time.Sleep(trackInterval)
+		// mouse：由 MouseMode 决定以哪种方式在鼠标位置显示
+		if mouseOverlay != nil {
+			var should bool
+			switch cfg.MouseMode {
+			case "follow":
+				should = cursorDetector.IsTargetCursor() && (chineseMode || cfg.MouseShowEN)
+			case "fallback":
+				should = cfg.CaretEnable && caretUnavailable && (chineseMode || cfg.CaretShowEN)
+			default: // off 或其它
+				should = false
+			}
+			if should != mouseActive {
+				mouseActive = should
+				if should {
+					mouseOverlay.Show()
+				} else {
+					mouseOverlay.Hide()
+				}
+			}
+		}
+
+		// 诊断：关键状态切换时记录（debug 级），用于分析"标记消失"类问题
+		if selfRender != dbgSelf || caretShould != dbgCaretShould || caretActive != dbgCaretActive || mouseActive != dbgMouse {
+			logging.Debug("detector 状态切换",
+				"selfRender", selfRender,
+				"chinese", chineseMode,
+				"caretAvail", !caretUnavailable,
+				"caretShould", caretShould,
+				"caretActive", caretActive,
+				"mouseActive", mouseActive,
+				"mode", cfg.MouseMode)
+			dbgSelf, dbgCaretShould, dbgCaretActive, dbgMouse = selfRender, caretShould, caretActive, mouseActive
+		}
+
+		if chineseMode != prevMode {
+			prevMode = chineseMode
+			if server != nil {
+				server.BroadcastMode(chineseMode)
+			}
+		}
+
+		time.Sleep(interval)
 	}
 }

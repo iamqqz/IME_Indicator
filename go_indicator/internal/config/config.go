@@ -12,8 +12,7 @@ import (
 
 // Config 全局配置
 type Config struct {
-	PollStateIntervalMS uint64
-	PollTrackIntervalMS uint64
+	PollIntervalMS uint64
 
 	TrayEnable bool
 
@@ -57,9 +56,8 @@ type LogConfig struct {
 // Default 默认值
 func Default() *Config {
 	return &Config{
-		PollStateIntervalMS: 100,
-		PollTrackIntervalMS: 10,
-		TrayEnable:          true,
+		PollIntervalMS: 30,
+		TrayEnable:     true,
 
 		CaretEnable:  true,
 		CaretColorCN: ParseColor("#FF7800A0"),
@@ -198,11 +196,8 @@ func loadConfig() *Config {
 		return int32(n), err == nil
 	}
 
-	if v, ok := getU64("poll", "state_interval_ms"); ok {
-		cfg.PollStateIntervalMS = v
-	}
-	if v, ok := getU64("poll", "track_interval_ms"); ok {
-		cfg.PollTrackIntervalMS = v
+	if v, ok := getU64("poll", "interval_ms"); ok {
+		cfg.PollIntervalMS = v
 	}
 	if v, ok := getBool("tray", "enable"); ok {
 		cfg.TrayEnable = v
@@ -335,9 +330,8 @@ func GetConfigPath() string {
 func generateTemplate() string {
 	return `# 输入指示器 (IME Indicator) 配置文件
 
-[poll]
-state_interval_ms = 100   # 状态检测间隔 (ms)
-track_interval_ms = 10    # 位置追踪间隔 (ms)
+	[poll]
+interval_ms = 30            # 轮询间隔 (ms) — IME 状态检测、坐标追踪统一此频率
 
 [tray]
 enable = true               # 是否显示托盘图标 (false 时完全后台运行，只能通过任务管理器结束)
@@ -371,6 +365,6 @@ foreground_whitelist = ["windowsterminal.exe", "wsl.exe", "conhost.exe", "neovid
 [log]
 enabled = true               # 是否写诊断日志（发布版无控制台，必须落盘才能分析）
 level = "info"               # 级别: debug | info | warn | error（排查时可临时改 debug）
-path = ""                    # 日志文件路径，空则用 %LOCALAPPDATA%\IME-Indicator\ime.log
+path = ""                    # 日志文件路径，空则用 exe 同目录 ime.log
 `
 }

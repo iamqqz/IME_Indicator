@@ -1,7 +1,7 @@
 // 文件日志子系统（基于标准库 log/slog，零新增依赖）。
 //
 // 发布版用 -H windowsgui 编译，stdout/stderr 被丢弃，因此所有诊断必须落盘。
-// 日志默认写入 %LOCALAPPDATA%\IME-Indicator\ime.log；可通过 [log] 配置段覆盖。
+// 日志默认写入 exe 同目录的 ime.log；可通过 [log] 配置段覆盖。
 // 多条 goroutine 并发写同一文件，故底层 writer 用互斥锁串行化。
 package logging
 
@@ -29,9 +29,8 @@ type Options struct {
 }
 
 const (
-	defaultSubdir = "IME-Indicator"
-	defaultName   = "ime.log"
-	maxSize       = 2 << 20 // 2MB：超过则重命名为 .old 再新建
+	defaultName = "ime.log"
+	maxSize     = 2 << 20 // 2MB：超过则重命名为 .old 再新建
 )
 
 // syncWriter 串行化写入，避免并发写同一文件时行交错
@@ -73,11 +72,11 @@ func Init(opts Options) {
 
 	path := opts.Path
 	if path == "" {
-		local := os.Getenv("LOCALAPPDATA")
-		if local == "" {
-			local = os.TempDir()
+		if exe, err := os.Executable(); err == nil {
+			path = filepath.Join(filepath.Dir(exe), defaultName)
+		} else {
+			path = defaultName
 		}
-		path = filepath.Join(local, defaultSubdir, defaultName)
 	}
 
 	if fi, err := os.Stat(path); err == nil && fi.Size() > maxSize {
