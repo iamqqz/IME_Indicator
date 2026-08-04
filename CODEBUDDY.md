@@ -91,7 +91,7 @@ go run ./cmd/imeqiao
 - `WNDPROC` 用 `windows.NewCallback` 且仅在包级 `var` 创建一次；**回调参数统一用 `uintptr`**（避免 `NewCallback` 对参数类型的限制），内部再转 `uint32`。
 
 ### 系统托盘（`internal/tray`）
-- `TrayManager` 创建隐藏窗口并 `Shell_NotifyIconW` 注册图标。图标加载优先级：exe 同目录 `icon.png` → 否则嵌入 exe 资源（资源 ID 1，由 `build.sh` 经 `rsrc` 把 `assets/icon.ico`+`app.manifest` 编为 `cmd/imeqiao/rsrc_windows_amd64.syso`）。
+- `TrayManager` 创建隐藏窗口并 `Shell_NotifyIconW` 注册图标。图标加载优先级：exe 同目录 `icon.ico` → 否则枚举嵌入 exe 资源中的 `RT_GROUP_ICON` 加载第一个（`icon.png` 不再用作托盘图标）→ 仍失败则回落系统默认应用图标。注意：rsrc 为组图标分配的资源 ID 不固定（manifest 占 1、组图标当前为 2），故 `loadIcon` 用 `EnumResourceNamesW` 枚举而非写死 ID；`assets/icon.ico`+`app.manifest` 由 `build.sh` 经 `rsrc` 编为 `cmd/imeqiao/rsrc_windows_amd64.syso`。
 - 右键菜单：编辑配置 / 重启程序 / 关于 / 退出，分别调用 `ShellExecuteW` 打开文件或重启自身、`MessageBoxW` 显示 `assets/about.txt`。
 
 ### 常驻 IPC 桥接（`internal/daemon` + `internal/client`）
